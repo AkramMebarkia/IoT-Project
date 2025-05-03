@@ -1,0 +1,6 @@
+Metric,Min_s,Max_s,Avg_s,Count
+ConnectionSetup,,,,0
+Subscription,,,,0
+PingRTT,,,,0
+PingREQ_Sent,,,,12
+PingRESP_Recv,,,,0

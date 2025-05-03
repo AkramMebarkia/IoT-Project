@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>MQTT Simulation & Broker Evaluation</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+
+  <!-- Bootstrap CSS -->
+  <link
+    href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
+    rel="stylesheet"
+  />
+</head>
+<body class="p-4">
+  <div class="container">
+    <h1 class="mb-4">MQTT Simulation & Broker Evaluation</h1>
+
+    <!-- 1) DESIGN -->
+    <div class="card mb-4 p-3">
+      <h5>1) Design Your Simulation</h5>
+
+      <div class="row g-2 mb-3">
+        <div class="col">
+          <label>Broker</label>
+          <select id="simBroker" class="form-select">
+            <option>activemq</option>
+            <option>mosquitto</option>
+            <option>hivemq</option>
+            <option>nanomq</option>
+            <option>emqx</option>
+            <option>rabbitmq</option>
+          </select>
+        </div>
+        <div class="col">
+          <label>Port</label>
+          <input id="simPort" type="number" class="form-control" value="1883">
+        </div>
+      </div>
+
+      <!-- Publishers -->
+      <div class="mb-3">
+        <h6>Publishers</h6>
+        <div class="row g-2 align-items-end">
+          <div class="col"><input id="pubName"      class="form-control" placeholder="Name"></div>
+          <div class="col"><input id="pubTopic"     class="form-control" placeholder="Topic"></div>
+          <div class="col"><input id="pubInterval"  type="number" class="form-control" placeholder="Interval (s)" step="0.1" value="1.0"></div>
+          <div class="col-auto"><label><input id="pubRandom" type="checkbox"> Random</label></div>
+          <div class="col-auto">
+            <select id="pubQos" class="form-control">
+              <option value="0">QoS 0</option>
+              <option value="1" selected>QoS 1</option>
+              <option value="2">QoS 2</option>
+            </select>
+          </div>
+          <div class="col"><input id="pubMin"       type="number" class="form-control" placeholder="Min" value="0"></div>
+          <div class="col"><input id="pubMax"       type="number" class="form-control" placeholder="Max" value="100"></div>
+          <div class="col-auto"><button id="addPub" class="btn btn-success">Add Pub</button></div>
+        </div>
+        <ul id="pubList" class="list-group mt-2"></ul>
+      </div>
+
+      <!-- Subscribers -->
+      <div class="mb-3">
+        <h6>Subscribers</h6>
+        <div class="row g-2 align-items-end">
+          <div class="col"><input id="subName"   class="form-control" placeholder="Name"></div>
+          <div class="col"><input id="subTopic"  class="form-control" placeholder="Topic"></div>
+          <div class="col">
+            <select id="subQos" class="form-control">
+              <option value="0">QoS 0</option>
+              <option value="1" selected>QoS 1</option>
+              <option value="2">QoS 2</option>
+            </select>
+          </div>
+          <div class="col">
+            <select id="subType" class="form-control">
+              <option value="gage">Gauge</option>
+              <option value="donut">Donut</option>
+              <option value="compass">Compass</option>
+              <option value="level">Level</option>
+            </select>
+          </div>
+          
+          <div class="col"><input id="subUnit"    class="form-control" placeholder="Units (e.g. °C)"></div>
+          <div class="col-auto"><button id="addSub" class="btn btn-success">Add Sub</button></div>
+        </div>
+        <ul id="subList" class="list-group mt-2"></ul>
+      </div>
+
+      <div class="d-flex gap-2">
+        <button id="deployBtn"    class="btn btn-primary">Deploy Simulation</button> 
+        <button id="runEvalBtn"   class="btn btn-secondary" disabled>Run Evaluation</button>
+      </div>
+    </div>
+
+    <!-- 2) BROKER SETTINGS -->
+    <div class="card mb-4 p-3">
+      <h5>2) Broker Settings</h5>
+      <form id="evalForm">
+        <div class="row g-2">
+          <div class="col">
+            <label class="form-label">Broker Name</label>
+            <select name="broker_name" class="form-select">
+              <option>activemq</option>
+              <option>mosquitto</option>
+              <option>hivemq</option>
+              <option>nanomq</option>
+              <option>emqx</option>
+              <option>rabbitmq</option>
+            </select>
+          </div>
+          <div class="col">
+            <label class="form-label">Port</label>
+            <input type="number" name="broker_port" class="form-control" value="1883" required>
+          </div>
+          <div class="col">
+            <label class="form-label">Avail. Duration (s)</label>
+            <input type="number" name="duration" class="form-control" value="60" required>
+          </div>
+          <div class="col">
+            <label class="form-label">Max Clients</label>
+            <input type="number" name="max_clients" class="form-control" value="100" required>
+          </div>
+          <div class="col">
+            <label class="form-label">Payload Size (bytes)</label>
+            <input type="number" name="payload_size" class="form-control" value="256" required>
+          </div>
+          <div class="col-auto align-self-end">
+            <button class="btn btn-primary" type="submit">Run Evaluation</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- PROGRESS MODAL -->
+  <div class="modal fade" id="progressModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content p-4 text-center">
+        <h5 id="progressText">Preparing…</h5>
+        <div class="progress mt-3" style="height:25px;">
+          <div id="progressBar"
+               class="progress-bar bg-info"
+               role="progressbar"
+               style="width:0%"
+               aria-valuemin="0"
+               aria-valuemax="100">0/3</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bootstrap Bundle + Chart.js if needed below… -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script>
+    const pubs = [], subs = [];
+
+    function renderList(el, arr, isPub) {
+      el.innerHTML = '';
+      arr.forEach((it,i)=>{
+        const li = document.createElement('li');
+        li.className = 'list-group-item d-flex justify-content-between align-items-center';
+        li.textContent = isPub
+          ? `${it.name} → ${it.topic} @${it.interval}ms [QoS ${it.qos}] ${it.random?'[rand]':''}[${it.min}-${it.max}]`
+          : `${it.name} ← ${it.topic} [QoS ${it.qos}]`;
+        let btn = document.createElement('button');
+        btn.className = 'btn btn-sm btn-outline-danger';
+        btn.textContent = '×';
+        btn.onclick = ()=>{ arr.splice(i,1); renderList(el,arr,isPub); };
+        li.append(btn);
+        el.append(li);
+      });
+    }
+
+    // addPub
+    document.getElementById('addPub').onclick = e=>{
+      e.preventDefault();
+      const p={};
+      p.name     = document.getElementById('pubName').value;
+      p.topic    = document.getElementById('pubTopic').value;
+      p.interval = document.getElementById('pubInterval').value;
+      p.random   = document.getElementById('pubRandom').checked;
+      p.qos      = document.getElementById('pubQos').value || 1;
+      p.min      = document.getElementById('pubMin').value;
+      p.max      = document.getElementById('pubMax').value;
+      pubs.push(p);
+      renderList(document.getElementById('pubList'),pubs,true);
+    };
+
+    // addSub
+    document.getElementById('addSub').onclick = e=>{
+      e.preventDefault();
+      const s={};
+      s.name  = document.getElementById('subName').value;
+      s.topic = document.getElementById('subTopic').value;
+      s.qos   = document.getElementById('subQos').value || 1;
+      s.gtype = document.getElementById('subType').value;
+      s.unit  = document.getElementById('subUnit').value;
+      subs.push(s);
+      renderList(document.getElementById('subList'),subs,false);
+    };
+
+    // deploy
+    document.getElementById('deployBtn').onclick = async ()=>{
+  if(!pubs.length && !subs.length){
+    return alert('Add at least one pub or sub');
+  }
+  const payload = {
+    broker_name: document.getElementById('simBroker').value,
+    broker_port: parseInt(document.getElementById('simPort').value,10),
+    interval:    parseFloat(document.getElementById('pubInterval').value,10),
+    publishers:  pubs,
+    subscribers: subs
+  };
+  const res = await fetch('/deploy_simulation',{
+    method:  'POST',
+    headers: {'Content-Type':'application/json'},
+    body:    JSON.stringify(payload)
+  });
+  if(!res.ok) return alert('Deploy failed: '+await res.text());
+  alert('Simulation Deployed');
+  document.getElementById('runEvalBtn').disabled = false;
+};
+
+
+    // runEvaluation (with pop-up)
+    async function runEvaluation(){
+      const form = document.forms['evalForm'];
+      const data = Object.fromEntries(new FormData(form).entries());
+      const resp = await fetch('/run_tests',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify(data)
+      });
+      const { job_id, error } = await resp.json();
+      if(error) return alert(error);
+
+      // show modal
+      const modalEl = document.getElementById('progressModal');
+      const modal   = new bootstrap.Modal(modalEl);
+      modal.show();
+      const txt = document.getElementById('progressText');
+      const bar = document.getElementById('progressBar');
+
+      const steps  = ['step1','step2','step3'];
+      const labels = [
+        'Running broker pinger…',
+        'Running broker availability…',
+        'Running max clients…'
+      ];
+
+      const iv = setInterval(async ()=>{
+        const s = await (await fetch(`/status/${job_id}`)).json();
+        const done = steps.filter(k=>s[k]==='done').length;
+        txt.textContent = labels[Math.min(done,2)];
+        const pct = (done/3)*100;
+        bar.style.width = `${pct}%`;
+        bar.textContent = `${done}/3`;
+
+        if(s.error || done===3){
+          clearInterval(iv);
+          modal.hide();
+          if(done===3){
+            const qs = new URLSearchParams(data).toString();
+            window.location = `/results/${data.broker_name}?${qs}`;
+          } else {
+            txt.textContent = 'Error!';
+            bar.className = 'progress-bar bg-danger';
+          }
+        }
+      }, 1000);
+    }
+
+    document.getElementById('runEvalBtn').onclick = runEvaluation;
+    document.getElementById('evalForm').addEventListener('submit',e=>{
+      e.preventDefault();
+      runEvaluation();
+    });
+  </script>
+</body>
+</html>

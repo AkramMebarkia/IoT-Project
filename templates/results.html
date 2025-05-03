@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Results for {{ broker_name }}</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <link
+    href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
+    rel="stylesheet"
+  >
+</head>
+<body class="p-4">
+  <div class="container">
+    <h1>Results: {{ broker_name }}</h1>
+
+    <!-- Download links -->
+    <p>
+      <a href="{{ url_for('download_file',
+          filename='results/broker_pinger_results_' + broker_name + '.csv') }}">
+        Download Ping CSV
+      </a> |
+      <a href="{{ url_for('download_file',
+          filename='logs/broker_availability_results_' + broker_name + '_' + request.args.get('duration') + '.csv') }}">
+        Download Availability CSV
+      </a> |
+      <a href="{{ url_for('download_file',
+          filename='results/max_clients_results_' + broker_name + '_' + request.args.get('max_clients') + '_P_' + request.args.get('payload_size') + '.csv') }}">
+        Download Max Clients CSV
+      </a> |
+      <a href="{{ url_for('download_file',
+          filename='results/mqtt_stats_' + broker_name + '_' + request.args.get('broker_port') + '_*.csv') }}">
+        Download Step-1 Summary CSV
+      </a>
+    </p>
+
+    <!-- 1) Ping delays -->
+    <div class="card mb-4 p-3">
+      <h3 class="card-title">Ping Round-Trip Delay</h3>
+      <canvas id="pingChart" height="100"></canvas>
+    </div>
+
+    <!-- 2) Availability -->
+    <div class="card mb-4 p-3">
+      <h3 class="card-title">Availability (MTBF vs MTTR)</h3>
+      <canvas id="availChart" height="100"></canvas>
+    </div>
+
+    <!-- 3) Max Clients -->
+    <div class="card mb-4 p-3">
+      <h3 class="card-title">Connection Time by Client</h3>
+      <canvas id="clientChart" height="100"></canvas>
+    </div>
+
+    <!-- 4) Step 1 Averages -->
+    <div class="card mb-4 p-3">
+      <h3 class="card-title">Step 1 Average Delays</h3>
+      <canvas id="avgChart" height="100"></canvas>
+    </div>
+
+    <a href="{{ url_for('index') }}" class="btn btn-secondary mt-3">Run Again</a>
+  </div>
+
+  <script>
+    // embed data passed from Flask
+    const pingT = {{ ping_timestamps | tojson }};
+    const pingD = {{ ping_delays     | tojson }};
+    const mtbf  = {{ mtbf }};
+    const mttr  = {{ mttr }};
+    const ids   = {{ client_ids    | tojson }};
+    const times = {{ client_times  | tojson }};
+    const avgMetrics = {{ avg_metrics_json | safe }};
+
+    // 1) Ping Chart
+    new Chart(document.getElementById('pingChart'), {
+      type: 'line',
+      data: {
+        labels: pingT,
+        datasets: [{
+          label: 'RTT Delay (s)',
+          data: pingD,
+          fill: false,
+          tension: 0.1
+        }]
+      },
+      options: {
+        scales: { y: { beginAtZero: true } }
+      }
+    });
+
+    // 2) Availability Chart
+    new Chart(document.getElementById('availChart'), {
+      type: 'bar',
+      data: {
+        labels: ['MTBF', 'MTTR'],
+        datasets: [{
+          label: 'Seconds',
+          data: [mtbf, mttr]
+        }]
+      },
+      options: {
+        scales: { y: { beginAtZero: true } }
+      }
+    });
+
+    // 3) Max Clients Chart
+    new Chart(document.getElementById('clientChart'), {
+      type: 'line',
+      data: {
+        labels: ids,
+        datasets: [{
+          label: 'Conn Time (s)',
+          data: times,
+          fill: false,
+          tension: 0.1
+        }]
+      },
+      options: {
+        scales: {
+          x: { title: { display: true, text: 'Client ID' } },
+          y: { beginAtZero: true }
+        }
+      }
+    });
+
+    // 4) Step 1 Averages Chart
+    new Chart(document.getElementById('avgChart'), {
+      type: 'bar',
+      data: {
+        labels: Object.keys(avgMetrics),
+        datasets: [{
+          label: 'Average Delay (s)',
+          data: Object.values(avgMetrics)
+        }]
+      },
+      options: {
+        scales: { y: { beginAtZero: true } }
+      }
+    });
+  </script>
+</body>
+</html>

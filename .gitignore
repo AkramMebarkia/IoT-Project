@@ -1,0 +1,11 @@
+# Ignore Python caches and virtual environments
+__pycache__/
+*.pyc
+venv/
+
+# Ignore Node modules if using Node-RED or similar
+node_modules/
+
+# Ignore OS files
+.DS_Store
+Thumbs.db
