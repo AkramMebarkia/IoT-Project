@@ -130,6 +130,10 @@ A complete end-to-end solution to **design**, **deploy**, and **evaluate** MQTT 
 [max_clients_test.py]  → clients CSV
 ```
 
+![Untitled-2025-01-17-1805](https://github.com/user-attachments/assets/1da83fad-9a97-4b3c-a70e-a648fbd87080)
+
+
+
 * **Node-RED**
 
   * **Inject** → **Splitter** → N × **Function → JSON → MQTT Out**
