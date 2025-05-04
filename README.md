@@ -173,4 +173,4 @@ Feel free to reuse & adapt!
 ---
 
 > **Questions?**
-> Open an issue or drop me an email at `your.email@example.com`
+> Open an issue or drop me an email at `akremmeb577@gmail.com`
