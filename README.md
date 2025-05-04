@@ -129,10 +129,7 @@ A complete end-to-end solution to **design**, **deploy**, and **evaluate** MQTT 
 [broker_availability.py] → logs CSV
 [max_clients_test.py]  → clients CSV
 ```
-
-![Untitled-2025-01-17-1805](https://github.com/user-attachments/assets/1da83fad-9a97-4b3c-a70e-a648fbd87080)
-
-
+![Untitled-2025-01-17-1805](https://github.com/user-attachments/assets/729e3e48-3d8e-496e-a645-e3e42e946f61)
 
 * **Node-RED**
 
