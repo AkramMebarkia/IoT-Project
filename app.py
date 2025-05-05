@@ -7,6 +7,9 @@ import uuid
 import threading
 import subprocess
 import requests
+import docker
+import time
+from datetime import datetime
 
 from flask import (
     Flask, render_template, request,
@@ -15,22 +18,99 @@ from flask import (
 
 app = Flask(__name__)
 
-# # Node-RED Admin API URL
-NODE_RED_URL     = 'http://localhost:1880'
-# BROKER_CONFIG_ID = '783325a25ca126cc'
+# Node-RED Admin API URL
+NODE_RED_URL = 'http://localhost:1880'
 
-# where our scripts dump CSVs
+# Broker container IDs
+BROKER_IDS = {
+    'mosquitto': 'f9d12cd8dcabc8fcad6f5ab68c9a9b8e9a5ed018e18385d55c3dd941109a3690',
+    'activemq': 'cf0a288b8762ffc521693e234a2507e93ecd7ccaea17e5e5a0faa89ff80227a4',
+    'nanomq': '7c1c0838010b887742305d6a8a73ba3c5ad435d951f1a8ceb07e1edc5e9c1f1b',
+    'hivemq': 'c2cd7bbef9eb24857933a08830afdc7544fd3001839d0ac1f7af5a36b7c9b8b6',
+    'emqx': 'd51a342d9f098ce4452d64b11373c896a7ada477ec7d2ef446f51db1624f01e4',
+    'rabbitmq': 'b9eae0064bf3aaabd8438e6a4269db4bdf9c7970eec384b8f824111c6e7fd22a',
+    'vernemq': '637ccaec617e7b403f984ec4f8c6961aebb995f024db451a1de94eb94c3723ea'
+}
+
+# Directories
 RESULTS_DIR = os.path.join(app.root_path, 'results')
-LOGS_DIR    = os.path.join(app.root_path, 'logs')
+LOGS_DIR = os.path.join(app.root_path, 'logs')
 os.makedirs(RESULTS_DIR, exist_ok=True)
 os.makedirs(LOGS_DIR, exist_ok=True)
 
-# In-memory job status store
-job_status = {}  # job_id -> {'step1':..., 'step2':..., 'step3':...}
+# Job tracking
+job_status = {}  # job_id -> {'step1':..., 'step2':..., 'step3':..., 'monitoring':...}
 
 def new_id():
     return uuid.uuid4().hex[:8]
 
+def monitor_container_stats(container_id, csv_path, stop_event):
+    """Monitor Docker container stats and write to CSV until stop_event is set"""
+    try:
+        client = docker.from_env()
+        container = client.containers.get(container_id)
+        
+        with open(csv_path, 'w', newline='') as csvfile:
+            writer = csv.writer(csvfile)
+            writer.writerow(['timestamp', 'cpu_percent', 'mem_usage', 'mem_limit',
+                           'net_rx', 'net_tx', 'block_read', 'block_write'])
+            
+            stats_gen = container.stats(stream=True, decode=True)
+            
+            while not stop_event.is_set():
+                try:
+                    stats = next(stats_gen)
+                    
+                    # Calculate CPU percentage with error handling
+                    cpu_stats = stats.get('cpu_stats', {})
+                    precpu_stats = stats.get('precpu_stats', {})
+                    
+                    cpu_delta = cpu_stats.get('cpu_usage', {}).get('total_usage', 0) - \
+                              precpu_stats.get('cpu_usage', {}).get('total_usage', 0)
+                    system_delta = cpu_stats.get('system_cpu_usage', 0) - \
+                                 precpu_stats.get('system_cpu_usage', 0)
+                    
+                    cpu_percent = (cpu_delta / system_delta) * 100 if system_delta != 0 else 0
+                    
+                    # Memory metrics with error handling
+                    memory_stats = stats.get('memory_stats', {})
+                    mem_usage = memory_stats.get('usage', 0)
+                    mem_limit = memory_stats.get('limit', 0)
+                    
+                    # Network metrics with error handling
+                    networks = stats.get('networks', {})
+                    net_rx = sum(net.get('rx_bytes', 0) for net in networks.values())
+                    net_tx = sum(net.get('tx_bytes', 0) for net in networks.values())
+                    
+                    # Block I/O metrics with error handling
+                    blkio_stats = stats.get('blkio_stats', {}).get('io_service_bytes_recursive', [])
+                    block_read = sum(blk.get('value', 0) for blk in blkio_stats if blk.get('op') == 'Read')
+                    block_write = sum(blk.get('value', 0) for blk in blkio_stats if blk.get('op') == 'Write')
+                    
+                    # Write metrics
+                    timestamp = datetime.now().isoformat()
+                    writer.writerow([
+                        timestamp,
+                        round(cpu_percent, 2),
+                        mem_usage,
+                        mem_limit,
+                        net_rx,
+                        net_tx,
+                        block_read,
+                        block_write
+                    ])
+                    csvfile.flush()
+                except (StopIteration, KeyError, ZeroDivisionError) as e:
+                    print(f"Error processing stats: {str(e)}")
+                    time.sleep(1)
+                    continue
+                except Exception as e:
+                    print(f"Critical error: {str(e)}")
+                    break
+    except Exception as e:
+        print(f"Monitoring setup failed: {str(e)}")
+    finally:
+        stop_event.set()
 
 @app.route('/deploy_simulation', methods=['POST'])
 def deploy_simulation():
@@ -319,73 +399,107 @@ def deploy_simulation():
 
     return jsonify(ok=True)
 
-
 def run_tests_in_background(job_id, args):
     python_cmd = sys.executable
-    env        = os.environ.copy()
+  
+    env = os.environ.copy()
     env['PYTHONIOENCODING'] = 'utf-8'
-    env['PYTHONUTF8']       = '1'
+    env['PYTHONUTF8'] = '1'
 
-    # Step definitions: note that broker_pinger.py now only gets --duration,
-    # and uses its own defaults for --interval and --topic.
-    steps = [
-        ('broker_pinger.py',       'step1', ['--duration', args['duration']]),
-        ('broker_availability.py', 'step2', ['--duration', args['duration']]),
-        ('max_clients_test.py',    'step3', ['--clients', args['max_clients'], '--payload_size', args['payload_size']]),
-    ]
+    # Get container ID from broker name
+    broker_name = args['broker_name'].lower()
+    container_id = BROKER_IDS.get(broker_name)
+    if not container_id:
+        job_status[job_id] = {'error': 'Invalid broker name'}
+        return
 
-    base_args = [
-        '--name', args['broker_name'],
-        '--port', args['broker_port']
-    ]
+    # Setup resource monitoring
+    resource_csv = os.path.join(RESULTS_DIR, f'resource_usage_{broker_name}_{job_id}.csv')
+    stop_event = threading.Event()
+    monitor_thread = threading.Thread(
+        target=monitor_container_stats,
+        args=(container_id, resource_csv, stop_event),
+        daemon=True
+    )
+    
+    job_status[job_id] = {
+        'step1': 'pending',
+        'step2': 'pending',
+        'step3': 'pending',
+        'monitoring': 'running'
+    }
+    
+    monitor_thread.start()
 
-    for script, key, extra in steps:
-        job_status[job_id][key] = 'running'
-        try:
-            subprocess.run(
-                [python_cmd,
-                 os.path.join(app.root_path,'evaluation_scripts', script),
-                 *base_args,
-                 *extra
-                ],
-                check=True, env=env, capture_output=True
-            )
-            job_status[job_id][key] = 'done'
-        except Exception as e:
-            print(f"Error in {script}:", e)
-            job_status[job_id][key] = 'error'
+    try:
+        # Test steps
+        steps = [
+            ('broker_pinger.py', 'step1', ['--duration', args['duration']]),
+            ('broker_availability.py', 'step2', ['--duration', args['duration']]),
+            ('max_clients_test.py', 'step3', 
+             ['--clients', args['max_clients'], '--payload_size', args['payload_size']]),
+        ]
 
+        base_args = [
+            '--name', args['broker_name'],
+            '--port', args['broker_port']
+        ]
+
+        for script, key, extra in steps:
+            job_status[job_id][key] = 'running'
+            try:
+                subprocess.run(
+                    [python_cmd,
+                     os.path.join(app.root_path, 'evaluation_scripts', script),
+                     *base_args,
+                     *extra
+                    ],
+                    check=True, env=env, capture_output=True
+                )
+                job_status[job_id][key] = 'done'
+            except subprocess.CalledProcessError as e:
+                print(f"Error in {script}: {e.stderr.decode()}")
+                job_status[job_id][key] = 'error'
+    finally:
+        # Stop monitoring when tests complete or error occurs
+        stop_event.set()
+        monitor_thread.join()
+        job_status[job_id]['monitoring'] = 'completed'
 
 @app.route('/run_tests', methods=['POST'])
 def run_tests():
-    args   = request.get_json()
+    args = request.get_json()
     job_id = uuid.uuid4().hex
-    job_status[job_id] = {'step1':'pending','step2':'pending','step3':'pending'}
     threading.Thread(
         target=run_tests_in_background,
-        args=(job_id,args),
+        args=(job_id, args),
         daemon=True
     ).start()
     return jsonify(job_id=job_id)
-
 
 @app.route('/status/<job_id>')
 def status(job_id):
     return jsonify(job_status.get(job_id, {}))
 
-
 @app.route('/')
 def index():
     return render_template('index.html')
 
-
 @app.route('/results/<broker_name>')
 def results(broker_name):
-    # pull in the same query-string params you already have:
-    duration    = request.args.get('duration','60')
-    max_clients = request.args.get('max_clients','100')
-    payload     = request.args.get('payload_size','256')
-    broker_port = request.args.get('broker_port','1883')
+    job_id = request.args.get('job_id')
+    duration = request.args.get('duration', '60')
+    max_clients = request.args.get('max_clients', '100')
+    payload = request.args.get('payload_size', '256')
+    broker_port = request.args.get('broker_port', '1883')
+
+    # Load resource data
+    resource_data = []
+    resource_csv = os.path.join(RESULTS_DIR, f'resource_usage_{broker_name}_{job_id}.csv')
+    if os.path.exists(resource_csv):
+        with open(resource_csv) as f:
+            reader = csv.DictReader(f)
+            resource_data = list(reader)
 
     # 1) ping times (for your line graph)
     ping_ts, ping_d = [], []
@@ -454,24 +568,24 @@ def results(broker_name):
 
     # JSON‐encode for Chart.js in your template
     avg_metrics_json = json.dumps(avg_metrics)
-
+ 
     return render_template('results.html',
-        broker_name       = broker_name,
-        ping_timestamps   = ping_ts,
-        ping_delays       = ping_d,
-        mtbf              = mtbf,
-        mttr              = mttr,
-        client_ids        = c_ids,
-        client_times      = c_times,
-        avg_metrics_json  = avg_metrics_json
+        broker_name=broker_name,
+        ping_timestamps=ping_ts,
+        ping_delays=ping_d,
+        mtbf=mtbf,
+        mttr=mttr,
+        client_ids=c_ids,
+        client_times=c_times,
+        avg_metrics_json=avg_metrics_json,
+        resource_data=json.dumps(resource_data),
+        job_id=job_id
     )
-
 
 @app.route('/download/<path:filename>')
 def download_file(filename):
     full = os.path.join(app.root_path, filename)
     return send_from_directory(os.path.dirname(full), os.path.basename(full), as_attachment=True)
-
 
 if __name__ == '__main__':
     app.run(debug=True)
