@@ -108,7 +108,7 @@ def main():
 
     # asynchronously connect
     metrics["conn_start"] = time.time()
-    client.connect_async(args.name, args.port, keepalive=int(args.interval))
+    client.connect_async("localhost", args.port, keepalive=int(args.interval))
     client.loop_start()
 
     # give one full interval before first ping

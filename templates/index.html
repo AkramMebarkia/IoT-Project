@@ -262,7 +262,10 @@
           modal.hide();
           if(done===3){
             const qs = new URLSearchParams(data).toString();
-            window.location = `/results/${data.broker_name}?${qs}`;
+            // window.location = `/results/${data.broker_name}?${qs}`;
+            const params = new URLSearchParams(data);
+            params.append('job_id', job_id);
+            window.location = `/results/${data.broker_name}?${params.toString()}`;
           } else {
             txt.textContent = 'Error!';
             bar.className = 'progress-bar bg-danger';
